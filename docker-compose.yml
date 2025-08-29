@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  websec-all-in-one:
+    build: .
+    container_name: websec-all-in-one
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # 单端口对外：POST / (JSON-RPC), GET /health, GET /jobs/{id}/sse
+    env_file:
+      - .env
+    environment:
+      # 必需/常用
+      - API_KEY=${API_KEY}                                  # 可选：如设置则需在请求头带 x-api-key
+      - DEFAULT_TIMEOUT=${DEFAULT_TIMEOUT:-0}               # 0=不限时（工具自己的 timeout 参数可覆盖）
+      - NUCLEI_TEMPLATES=${NUCLEI_TEMPLATES:-/root/nuclei-templates}
+
+      # 可选：日志/作业缓冲调优
+      - SLOW_THRESHOLD_SEC=${SLOW_THRESHOLD_SEC:-3.0}       # 慢日志阈值
+      - JOB_MAX_LINES=${JOB_MAX_LINES:-5000}                # 每个作业最多保留的日志行数
+      - JOB_TTL_SEC=${JOB_TTL_SEC:-3600}                    # 作业完成后在内存中保留时长（秒）
+
+    # 建议单 worker（内存 Job Registry），如需多进程请改成共享存储实现
+    command: ["uvicorn", "mcp_server:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+
+    # 可选：如果你的 nuclei-templates 放在宿主机，映射进来
+    # volumes:
+    #   - ./nuclei-templates:/root/nuclei-templates:ro
+
+    # 可选：健康检查
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -H 'x-api-key: ${API_KEY}' http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+

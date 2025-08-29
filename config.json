@@ -1,0 +1,534 @@
+{
+  "server": {
+    "ignore_timeout": true,
+    "default_timeout": 0,
+    "hard_timeout_cap_sec": 86400,
+    "max_concurrent_jobs": 4,
+    "job_max_lines": 5000,
+    "job_max_bytes": 10485760,
+    "job_ttl_sec": 3600
+  },
+  "assets": {
+    "port_profiles": {
+      "top-100": "top-100",
+      "top-1000": "top-1000",
+      "full": "-",
+      "p-": "-",
+      "db-common": "1433,1521,3306,5432,27017",
+      "web-common": "80,443,8080,8443,8000,3000,5000",
+      "mail-common": "25,110,143,465,587,993,995"
+    }
+  },
+  "tools": {
+    "subfinder": {
+      "enabled": true,
+      "bin": "subfinder",
+      "desc": "被动子域枚举（ProjectDiscovery）",
+      "params": {
+        "domain": { "type": "str", "required": true },
+        "all": { "type": "bool", "default": true },
+        "json": { "type": "bool", "default": true },
+        "silent": { "type": "bool", "default": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-d", "${domain}",
+        { "when": { "is_true": "all" }, "emit": ["-all"] },
+        { "when": { "is_true": "silent" }, "emit": ["-silent"] },
+        { "when": { "is_true": "json" }, "emit": ["-json"] }
+      ]
+    },
+
+    "amass_enum": {
+      "enabled": true,
+      "bin": "amass",
+      "desc": "OWASP Amass 子域名枚举",
+      "params": {
+        "domain": { "type": "str", "required": true },
+        "passive": { "type": "bool", "default": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "enum", "-d", "${domain}",
+        { "when": { "is_true": "passive" }, "emit": ["-passive"] }
+      ]
+    },
+
+    "naabu": {
+      "enabled": true,
+      "bin": "naabu",
+      "desc": "快速端口扫描（ProjectDiscovery）",
+      "params": {
+        "host": { "type": "str", "required": true },
+        "ports": { "type": "str", "default": "top-1000" },
+        "rate": { "type": "int", "default": 1000 },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-host", "${host}",
+        { "switch": "ports", "cases": [
+          { "startswith": "top-", "emit": ["-top-ports", "${ports|after:top-}"] },
+          { "else": ["-p", "${ports|resolve_ports}"] }
+        ]},
+        { "when": { "gt": ["rate", 0] }, "emit": ["-rate", "${rate}"] }
+      ]
+    },
+
+    "nmap": {
+      "enabled": true,
+      "bin": "nmap",
+      "desc": "端口/服务探测（nmap）",
+      "params": {
+        "host": { "type": "str", "required": true },
+        "ports": { "type": "str", "default": "top-1000" },
+        "udp": { "type": "bool", "default": false },
+        "os_detect": { "type": "bool", "default": false },
+        "scripts": { "type": "str", "default": "" },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-Pn", "-n",
+        { "when": { "eq": ["scale","fast"] }, "emit": ["-T4","-sS"], "else": ["-T4","-sS","-sV","-sC"] },
+        { "switch": "ports", "cases": [
+          { "startswith": "top-", "emit": ["--top-ports", "${ports|after:top-}"] },
+          { "in": ["-","full","all","p-"], "emit": ["-p-"] },
+          { "else": ["-p", "${ports|resolve_ports}"] }
+        ]},
+        { "when": { "is_true": "udp" }, "emit": ["-sU"] },
+        { "when": { "is_true": "os_detect" }, "emit": ["-O"] },
+        { "when": { "nonempty": "scripts" }, "emit": ["--script", "${scripts}"] },
+        "${host}"
+      ]
+    },
+
+    "httpx": {
+      "enabled": true,
+      "bin": "httpx",
+      "desc": "Web 存活与指纹（ProjectDiscovery）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "title": { "type": "bool", "default": true },
+        "tech_detect": { "type": "bool", "default": true },
+        "follow_redirects": { "type": "bool", "default": true },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "defaults": { "scale": "fast", "timeout": 0 },
+      "build": [
+        "-status-code", "-content-length",
+        { "when": { "is_true": "title" }, "emit": ["-title"] },
+        { "when": { "is_true": "tech_detect" }, "emit": ["-tech-detect"] },
+        { "when": { "is_true": "follow_redirects" }, "emit": ["-follow-redirects"] },
+        { "when": { "eq": ["scale","deep"] }, "emit": ["-hash", "-favicon"] },
+        "-u", "${url}"
+      ]
+    },
+
+    "whatweb": {
+      "enabled": true,
+      "bin": "whatweb",
+      "desc": "Web 指纹（WhatWeb）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "aggressive": { "type": "bool", "default": false },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "--no-errors", "--color=never",
+        "-a",
+        { "when": { "or": [ { "is_true": "aggressive" }, { "eq": ["scale","deep"] } ] }, "emit": ["3"], "else": ["1"] },
+        "${url}"
+      ]
+    },
+
+    "wafw00f": {
+      "enabled": true,
+      "bin": "wafw00f",
+      "desc": "WAF 检测（wafw00f）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "aggressive": { "type": "bool", "default": false },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        { "when": { "or": [ { "is_true": "aggressive" }, { "eq": ["scale","deep"] } ] }, "emit": ["-a"] },
+        "${url}"
+      ]
+    },
+
+    "katana": {
+      "enabled": true,
+      "bin": "katana",
+      "desc": "Web 爬虫（ProjectDiscovery）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "depth": { "type": "int", "default": 2 },
+        "js_crawl": { "type": "bool", "default": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}",
+        "-d", "${depth}",
+        { "when": { "is_true": "js_crawl" }, "emit": ["-jc"] }
+      ]
+    },
+
+    "gau": {
+      "enabled": true,
+      "bin": "gau",
+      "desc": "GetAllUrls",
+      "params": {
+        "domain": { "type": "str", "required": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "${domain}"
+      ]
+    },
+
+    "waybackurls": {
+      "enabled": true,
+      "bin": "waybackurls",
+      "desc": "WaybackMachine 历史 URL",
+      "params": {
+        "domain": { "type": "str", "required": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "${domain}"
+      ]
+    },
+
+    "ffuf": {
+      "enabled": true,
+      "bin": "ffuf",
+      "desc": "目录/参数 Fuzz（ffuf）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "wordlist": { "type": "str", "default": "/usr/share/dirb/wordlists/common.txt" },
+        "mode": { "type": "str", "default": "dir", "enum": ["dir","param"] },
+        "threads": { "type": "int", "default": 60 },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u",
+        { "switch": "mode", "cases": [
+          { "equals": "param", "emit": ["${url}?FUZZ="] },
+          { "else": ["${url}/FUZZ"] }
+        ]},
+        "-w", "${wordlist}",
+        { "when": { "gt": ["threads", 0] }, "emit": ["-t", "${threads}"] },
+        { "when": { "eq": ["scale","fast"] },
+          "emit": ["-mc","200,204,301,302,307,401,403"],
+          "else": ["-recursion","-recursion-depth","2","-rate","0","-ac","-mc","200,204,301,302,307,401,403"]
+        }
+      ]
+    },
+
+    "feroxbuster": {
+      "enabled": true,
+      "bin": "feroxbuster",
+      "desc": "目录扫描（feroxbuster）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "wordlist": { "type": "str", "default": "/usr/share/dirb/wordlists/common.txt" },
+        "depth": { "type": "int", "default": 2 },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}",
+        "-w", "${wordlist}",
+        { "when": { "eq": ["scale","fast"] }, "emit": ["-d","1","-t","50","-n"], "else": ["-d","${depth}","-t","150","-r"] }
+      ]
+    },
+
+    "dirsearch": {
+      "enabled": true,
+      "bin": "dirsearch",
+      "desc": "目录扫描（dirsearch）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "wordlist": { "type": "str", "default": "/usr/share/dirb/wordlists/common.txt" },
+        "extensions": { "type": "str", "default": "php,asp,aspx,jsp,html,js" },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}",
+        "-w", "${wordlist}",
+        "-e", "${extensions}",
+        "--random-agent",
+        { "when": { "eq": ["scale","fast"] }, "emit": ["-t","50","--timeout","6"], "else": ["-t","120","--deep-recursive","--recursive","--timeout","12"] }
+      ]
+    },
+
+    "gobuster_dir": {
+      "enabled": true,
+      "bin": "gobuster",
+      "desc": "Gobuster 目录",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "wordlist": { "type": "str", "default": "/usr/share/dirb/wordlists/common.txt" },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "dir", "-u", "${url}", "-w", "${wordlist}"
+      ]
+    },
+
+    "gobuster_dns": {
+      "enabled": true,
+      "bin": "gobuster",
+      "desc": "Gobuster DNS",
+      "params": {
+        "domain": { "type": "str", "required": true },
+        "wordlist": { "type": "str", "default": "/usr/share/wordlists/dns/subdomains-top1million-5000.txt" },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "dns", "-d", "${domain}", "-w", "${wordlist}"
+      ]
+    },
+
+    "gobuster_vhost": {
+      "enabled": true,
+      "bin": "gobuster",
+      "desc": "Gobuster VHOST",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "wordlist": { "type": "str", "default": "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-110000.txt" },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "vhost", "-u", "${url}", "-w", "${wordlist}"
+      ]
+    },
+
+    "dirb": {
+      "enabled": true,
+      "bin": "dirb",
+      "desc": "目录扫描（dirb）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "wordlist": { "type": "str", "default": "/usr/share/dirb/wordlists/common.txt" },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "${url}", "${wordlist}"
+      ]
+    },
+
+    "nuclei": {
+      "enabled": true,
+      "bin": "nuclei",
+      "desc": "漏洞模板引擎（ProjectDiscovery）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "templates": { "type": "str", "default": "/root/nuclei-templates" },
+        "severity": { "type": "str", "default": "", "enum": ["","low","medium","high","critical"] },
+        "rate_limit": { "type": "int", "default": 600 },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}",
+        { "when": { "eq": ["scale","fast"] }, "emit": ["-t", "${templates}/http", "-ni"], "else": ["-t", "${templates}"] },
+        "-rl", "${rate_limit}",
+        { "when": { "nonempty": "severity" }, "emit": ["-severity", "${severity}"] }
+      ]
+    },
+
+    "nikto": {
+      "enabled": true,
+      "bin": "nikto",
+      "desc": "Web 漏洞/配置扫描（Nikto）",
+      "params": {
+        "target": { "type": "str", "required": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-h", "${target}"
+      ]
+    },
+
+    "sslyze": {
+      "enabled": true,
+      "bin": "sslyze",
+      "desc": "SSL/TLS 扫描（sslyze）",
+      "params": {
+        "host": { "type": "str", "required": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "${host}"
+      ]
+    },
+
+    "testssl": {
+      "enabled": true,
+      "bin": "testssl",
+      "desc": "SSL/TLS 测试（testssl）",
+      "params": {
+        "target": { "type": "str", "required": true },
+        "fast": { "type": "bool", "default": true },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        { "when": { "or": [ { "is_true": "fast" }, { "eq": ["scale","fast"] } ] }, "emit": ["--fast"], "else": ["--wide","--openssl","openssl","--sneaky"] },
+        "${target}"
+      ]
+    },
+
+    "sqlmap": {
+      "enabled": true,
+      "bin": "sqlmap",
+      "desc": "SQL 注入（sqlmap）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "data": { "type": "str", "default": "" },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}",
+        { "when": { "nonempty": "data" }, "emit": ["--data", "${data}"] },
+        "--batch", "--random-agent",
+        { "when": { "eq": ["scale","fast"] }, "emit": ["--level=2","--risk=1","--time-sec=3","--flush-session","--smart"], "else": ["--level=5","--risk=3","--time-sec=8","--flush-session","--smart","--tamper=between,randomcase"] }
+      ]
+    },
+
+    "dalfox": {
+      "enabled": true,
+      "bin": "dalfox",
+      "desc": "XSS 扫描（dalfox）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "url", "${url}",
+        { "when": { "eq": ["scale","fast"] }, "emit": ["--mining-dict","--ignore-return","--skip-bav"], "else": ["--follow-redirects","--waf-evasion","--blind-xss","--mining-all"] }
+      ]
+    },
+
+    "xsstrike": {
+      "enabled": true,
+      "bin": "xsstrike",
+      "desc": "XSS 扫描（XSStrike）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "skip_heuristics": { "type": "bool", "default": false },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}",
+        { "when": { "is_true": "skip_heuristics" }, "emit": ["--skip-heuristic"] }
+      ]
+    },
+
+    "crlfuzz": {
+      "enabled": true,
+      "bin": "crlfuzz",
+      "desc": "CRLF 注入检测（crlfuzz）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}",
+        { "when": { "eq": ["scale","deep"] }, "emit": ["-l","payloads.txt"] }
+      ]
+    },
+
+    "corsy": {
+      "enabled": true,
+      "bin": "corsy",
+      "desc": "CORS 配置检查（Corsy）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}"
+      ]
+    },
+
+    "openredirect": {
+      "enabled": true,
+      "bin": "openredirex",
+      "desc": "开放重定向（OpenRedireX）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "scale": { "type": "str", "default": "auto", "enum": ["auto","fast","deep"] },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}",
+        { "when": { "eq": ["scale","deep"] }, "emit": ["--keyword","url,next,redirect,redir,return,to,target,dest,destination"] }
+      ]
+    },
+
+    "wpscan": {
+      "enabled": true,
+      "bin": "wpscan",
+      "desc": "WordPress 扫描（WPScan）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "api_token": { "type": "str", "default": "" },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "--url", "${url}",
+        { "when": { "nonempty": "api_token" }, "emit": ["--api-token", "${api_token}"] },
+        "--disable-tls-checks"
+      ]
+    },
+
+    "joomscan": {
+      "enabled": true,
+      "bin": "joomscan",
+      "desc": "Joomla 扫描（joomscan）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}"
+      ]
+    },
+
+    "droopescan": {
+      "enabled": true,
+      "bin": "droopescan",
+      "desc": "Drupal 扫描（droopescan）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "scan", "-u", "${url}"
+      ]
+    },
+
+    "cmseek": {
+      "enabled": true,
+      "bin": "cmseek",
+      "desc": "CMS 指纹识别（CMSeeK）",
+      "params": {
+        "url": { "type": "str", "required": true },
+        "timeout": { "type": "int", "default": 0 }
+      },
+      "build": [
+        "-u", "${url}", "--random-agent"
+      ]
+    }
+  }
+}
