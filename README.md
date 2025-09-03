@@ -57,7 +57,6 @@ Extension:
 ```bash
 git clone <repo-url>
 cd KALI_MCP_SERVER
-cp .env.example .env
 docker compose up -d --build
 ```
 

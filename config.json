@@ -20,6 +20,26 @@
     }
   },
   "tools": {
+    "shell": {
+      "enabled": true,
+      "bin": "/bin/sh",
+      "desc": "任意命令执行（/bin/sh -lc）",
+      "params": {
+        "cmd":     {"type": "str",  "required": true},
+        "timeout": {"type": "int",  "default": 0},
+        "scale":   {"type": "str",  "default": "auto", "enum": ["auto","fast","deep"]},
+        "async":   {"type": "bool", "default": false},
+        "progress":{"type": "str",  "default": ""}
+      },
+      "defaults": {
+        "timeout": 0,
+        "scale": "fast"
+      },
+      "build": [
+        "-lc",
+        "${cmd}"
+      ]
+    },
     "subfinder": {
       "enabled": true,
       "bin": "subfinder",
